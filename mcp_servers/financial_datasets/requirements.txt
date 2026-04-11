@@ -1,0 +1,5 @@
+# Financial Datasets Proxy MCP Server dependencies
+fastapi
+uvicorn[standard]
+httpx
+python-dotenv

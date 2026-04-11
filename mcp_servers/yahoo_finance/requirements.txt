@@ -1,0 +1,4 @@
+# Yahoo Finance MCP Server dependencies
+fastapi
+uvicorn[standard]
+yfinance

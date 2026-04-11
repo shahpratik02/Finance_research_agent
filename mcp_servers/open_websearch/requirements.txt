@@ -1,0 +1,5 @@
+# Open Web Search MCP Server dependencies
+fastapi
+uvicorn[standard]
+duckduckgo-search
+httpx

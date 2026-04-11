@@ -1,0 +1,5 @@
+# FRED MCP Server dependencies
+fastapi
+uvicorn[standard]
+fredapi
+pandas
