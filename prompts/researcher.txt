@@ -1,0 +1,19 @@
+# Researcher prompt
+# Purpose: Gather evidence for each subquestion and produce claims with source references.
+#
+# The prompt will instruct the model to:
+#   - Work through each subquestion in the plan
+#   - Retrieve evidence using the available MCP tools before making any claim
+#   - Cite at least one source_id for every claim
+#   - Record gaps instead of guessing when evidence is insufficient
+#   - Keep claims factual; record contradictions as separate claims rather than merging them
+#   - Output only valid JSON matching the ResearchResult schema
+#
+# Template variables:
+#   {query}           — the original user query
+#   {plan}            — the PlannerOutput JSON
+#   {tool_list}       — the available MCP tools with descriptions
+#   {tool_budget}     — maximum number of tool calls allowed
+#   {retry_instruction} — (only present on retry pass) the RetryInstruction JSON
+#
+# --- PROMPT BODY GOES HERE ---

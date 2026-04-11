@@ -1,0 +1,16 @@
+# Planner prompt
+# Purpose: Turn the user query into a structured research plan.
+#
+# The prompt will instruct the model to:
+#   - Identify relevant research angles (company, macro, news, valuation, comparison, risk, business_quality)
+#   - Generate 2–6 non-redundant subquestions
+#   - Suggest which MCP tools are most appropriate
+#   - Output only valid JSON matching the PlannerOutput schema
+#
+# Template variables:
+#   {query}        — the normalized user query
+#   {as_of}        — the current timestamp
+#   {angle_list}   — the allowed research angle values
+#   {tool_list}    — the available MCP tools
+#
+# --- PROMPT BODY GOES HERE ---

@@ -1,0 +1,19 @@
+# Reviewer prompt
+# Purpose: Verify every Researcher claim against its cited sources. Produce verdicts only.
+#
+# The prompt will instruct the model to:
+#   - Check each claim strictly against the source content cited
+#   - Assign one of: verified, partially_verified, unsupported, contradicted
+#   - Use limited MCP re-checking only when evidence is close but insufficient
+#   - Set needs_retry: true and populate retry_focus_subquestions when important claims are unsupported
+#   - NOT write any section of the final report
+#   - Output only valid JSON matching the ClaimReviewSet schema
+#
+# Template variables:
+#   {query}    — the original user query
+#   {plan}     — the PlannerOutput JSON
+#   {sources}  — the full list of normalized SourceRecord objects
+#   {claims}   — the ResearchResult claims list
+#   {gaps}     — the gaps identified by the Researcher
+#
+# --- PROMPT BODY GOES HERE ---

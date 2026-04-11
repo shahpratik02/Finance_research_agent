@@ -1,0 +1,25 @@
+# Finance Research Agent — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi
+uvicorn[standard]
+
+# Configuration
+python-dotenv
+pydantic
+pydantic-settings
+
+# HTTP client (for SGLang and MCP server calls)
+httpx
+
+# LLM / model serving
+# SGLang is installed separately — see README for setup instructions.
+# For quantized Gemma 4 E4B on Apple Silicon, install llama-cpp-python
+# with Metal support as the SGLang-compatible inference backend.
+
+# Database
+# Uses Python's built-in sqlite3 — no extra package required.
+
+# Utilities
+uuid  # built-in, listed for clarity
