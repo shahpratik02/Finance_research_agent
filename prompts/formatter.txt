@@ -1,19 +1,14 @@
-# Formatter prompt
-# Purpose: Write the final report from approved claims only.
-#
-# The prompt will instruct the model to:
-#   - Organize the provided approved claims into the required report sections
-#   - Match the requested output_style (memo, brief, or full)
-#   - Place unverified items only in the caveats section, never in the main analysis
-#   - Reference only the source_ids provided — do not introduce new claims
-#   - Preserve nuance; avoid overstating conclusions
-#   - Output only valid JSON matching the FinalReport schema
-#
-# Template variables:
-#   {query}            — the original user query
-#   {as_of}            — the current timestamp
-#   {output_style}     — memo | brief | full
-#   {approved_claims}  — list of verified and partially_verified claims with resolved source info
-#   {unverified_items} — items to include in caveats section
-#
-# --- PROMPT BODY GOES HERE ---
+Write a structured report from pre-verified claims only. Do NOT invent facts or reference unlisted sources.
+
+Date: {as_of} | Query: {query} | Style: {output_style}
+
+Style: memo=executive summary + 2-4 sections; brief=2-4 sentences; full=detailed report.
+
+## Approved claims
+{approved_claims}
+
+## Unverified (caveats only)
+{unverified_items}
+
+## Output JSON
+{{"title":"...","as_of":"{as_of}","output_style":"{output_style}","executive_summary":["..."],"sections":[{{"heading":"...","paragraphs":["..."]}}],"unverified_items":["..."],"reference_source_ids":["..."]}}

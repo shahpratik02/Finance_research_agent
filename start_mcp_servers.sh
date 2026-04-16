@@ -12,13 +12,8 @@
 
 set -e
 
-# Ensure /usr/local/bin (Node/npm location on this machine) is on PATH
-export PATH="/usr/local/bin:/Users/shruti/Library/Python/3.9/bin:$PATH"
-PYTHON="/usr/bin/python3"
-NODE="/usr/local/bin/node"
-OWS_INDEX="$HOME/.npm-global/lib/node_modules/open-websearch/build/index.js"
-
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON="$PROJECT_DIR/.venv/bin/python"
 LOGS_DIR="$PROJECT_DIR/logs/mcp_servers"
 mkdir -p "$LOGS_DIR"
 
@@ -34,9 +29,9 @@ else
 fi
 
 echo ""
-echo "╔══════════════════════════════════════╗"
+echo "╔══════════════════════════════════════════╗"
 echo "║   Starting Finance Research MCP Servers  ║"
-echo "╚══════════════════════════════════════╝"
+echo "╚══════════════════════════════════════════╝"
 echo ""
 
 # ── 1. Yahoo Finance — port 8001 ───────────────────────────────────────────────
@@ -69,8 +64,8 @@ echo "      PID: $(cat "$LOGS_DIR/open_websearch.pid")"
 
 # ── Wait for servers to warm up ────────────────────────────────────────────────
 echo ""
-echo "Waiting 8 seconds for servers to start (Yahoo Finance loads slowly)..."
-sleep 8
+echo "Waiting 15 seconds for servers to start (Yahoo Finance loads slowly)..."
+sleep 15
 
 # ── Run health checks ──────────────────────────────────────────────────────────
 echo ""
@@ -80,7 +75,7 @@ check_health() {
     local name=$1
     local url=$2
     local result
-    result=$(curl -s --max-time 10 "$url" 2>/dev/null || echo "TIMEOUT")
+    result=$(curl -s --max-time 20 "$url" 2>/dev/null || echo "TIMEOUT")
     if echo "$result" | grep -q '"status".*"ok"'; then
         echo "  ✓ $name is UP"
     elif [ "$result" = "TIMEOUT" ]; then

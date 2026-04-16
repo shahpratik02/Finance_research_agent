@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.trace import trace_tool_call, trace_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ _TOOL_ALIAS: dict[str, str] = {
 
 _CALL_TIMEOUT_S = 30.0   # seconds per individual HTTP call
 _RETRY_DELAY_S = 1.0     # wait before the one retry attempt
-_RETRYABLE_STATUS = {500, 502, 503, 504}
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -122,7 +123,13 @@ def call_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     server_tool = _TOOL_ALIAS.get(tool, tool)
     payload = {"tool": server_tool, "arguments": arguments}
 
-    return _post_with_retry(url, payload, tool=tool)
+    trace_tool_call(tool, arguments, provider)
+
+    data = _post_with_retry(url, payload, tool=tool)
+
+    trace_tool_result(tool, data)
+
+    return data
 
 
 def list_tools(provider: str) -> list[dict]:

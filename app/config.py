@@ -55,6 +55,9 @@ class Settings:
     # ── Logging ────────────────────────────────────────────────────────────────
     log_level: str
 
+    # ── Debug ──────────────────────────────────────────────────────────────────
+    debug_trace: bool
+
     def __init__(self) -> None:
         # ── SGLang ────────────────────────────────────────────────────────────
         self.sglang_base_url = self._require("SGLANG_BASE_URL")
@@ -94,7 +97,8 @@ class Settings:
             level=getattr(logging, self.log_level, logging.INFO),
             format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
         )
-
+        # ── Debug ─────────────────────────────────────────────────────────
+        self.debug_trace = os.environ.get("DEBUG_TRACE", "").lower() in ("1", "true", "yes")
     # ── MCP URL lookup helper ──────────────────────────────────────────────────
 
     def mcp_url_for(self, provider: str) -> str:

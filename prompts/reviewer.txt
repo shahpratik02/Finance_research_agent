@@ -1,19 +1,23 @@
-# Reviewer prompt
-# Purpose: Verify every Researcher claim against its cited sources. Produce verdicts only.
-#
-# The prompt will instruct the model to:
-#   - Check each claim strictly against the source content cited
-#   - Assign one of: verified, partially_verified, unsupported, contradicted
-#   - Use limited MCP re-checking only when evidence is close but insufficient
-#   - Set needs_retry: true and populate retry_focus_subquestions when important claims are unsupported
-#   - NOT write any section of the final report
-#   - Output only valid JSON matching the ClaimReviewSet schema
-#
-# Template variables:
-#   {query}    — the original user query
-#   {plan}     — the PlannerOutput JSON
-#   {sources}  — the full list of normalized SourceRecord objects
-#   {claims}   — the ResearchResult claims list
-#   {gaps}     — the gaps identified by the Researcher
-#
-# --- PROMPT BODY GOES HERE ---
+Verify each claim against the cited sources. Output verdicts only — do NOT write the report.
+
+Date: {as_of}
+
+## Query: {query}
+
+## Sources
+{sources}
+
+## Claims
+{claims}
+
+## Gaps
+{gaps}
+
+## Instructions
+For each claim: check if sources support it. Assign verdict: verified | partially_verified | unsupported | contradicted.
+After all claims, set global needs_retry=true only if multiple important claims are unsupported.
+
+## Output JSON
+{{"claim_reviews":[{{"claim_id":"...","verdict":"verified","notes":"...","final_source_ids":["..."],"needs_recheck":false}}],"global_decision":{{"needs_retry":false,"retry_focus_subquestions":[],"unsupported_claim_ids":[]}}}}
+
+Output only valid JSON. No explanation, no markdown, no code fences.
