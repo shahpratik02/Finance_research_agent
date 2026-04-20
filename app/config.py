@@ -33,10 +33,10 @@ class Settings:
         from app.config import settings
     """
 
-    # ── SGLang / inference ─────────────────────────────────────────────────────
-    sglang_base_url: str
-    sglang_model_id: str
-    sglang_context_limit: int
+    # ── LLM / inference ─────────────────────────────────────────────────────
+    llm_base_url: str
+    llm_model_id: str
+    llm_context_limit: int
 
     # ── MCP server URLs ────────────────────────────────────────────────────────
     yahoo_finance_mcp_url: str
@@ -59,10 +59,10 @@ class Settings:
     debug_trace: bool
 
     def __init__(self) -> None:
-        # ── SGLang ────────────────────────────────────────────────────────────
-        self.sglang_base_url = self._require("SGLANG_BASE_URL")
-        self.sglang_model_id = self._require("SGLANG_MODEL_ID")
-        self.sglang_context_limit = int(os.environ.get("SGLANG_CONTEXT_LIMIT", "32768"))
+        # ── LLM ────────────────────────────────────────────────────────────
+        self.llm_base_url = self._require("LLM_BASE_URL")
+        self.llm_model_id = self._require("LLM_MODEL_ID")
+        self.llm_context_limit = int(os.environ.get("LLM_CONTEXT_LIMIT", "32768"))
 
         # ── MCP server URLs ───────────────────────────────────────────────────
         self.yahoo_finance_mcp_url = os.environ.get(
@@ -140,7 +140,7 @@ class Settings:
     def __repr__(self) -> str:
         return (
             f"Settings("
-            f"sglang_base_url={self.sglang_base_url!r}, "
+            f"llm_base_url={self.llm_base_url!r}, "
             f"yahoo_finance_mcp_url={self.yahoo_finance_mcp_url!r}, "
             f"fred_mcp_url={self.fred_mcp_url!r}, "
             f"financial_datasets_mcp_url={self.financial_datasets_mcp_url!r}, "

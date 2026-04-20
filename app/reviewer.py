@@ -3,7 +3,7 @@ Reviewer agent.
 
 Responsibilities:
 - Accept the ResearchResult and all normalized sources.
-- Call the SGLang model (via sglang_client) with the reviewer prompt.
+- Call the LLM module (via llm_client) with the reviewer prompt.
 - Optionally invoke MCP tools (via mcp_client) for limited targeted re-checking.
 - Return a structured ClaimReviewSet (verdicts per claim, global_decision with retry flag).
 
@@ -30,7 +30,7 @@ from app.schemas import (
     ResearchResult,
     SourceRecord,
 )
-from app.sglang_client import REVIEWER_PROFILE, chat
+from app.llm_client import REVIEWER_PROFILE, chat
 from app.source_normalizer import normalize
 
 logger = logging.getLogger(__name__)

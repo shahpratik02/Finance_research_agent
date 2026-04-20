@@ -3,7 +3,7 @@ Researcher agent.
 
 Responsibilities:
 - Accept the planner output (and optionally a RetryInstruction for a second pass).
-- Call the SGLang model (via sglang_client) with the researcher prompt and tool access.
+- Call the LLM module (via llm_client) with the researcher prompt and tool access.
 - Invoke MCP tools (via mcp_client) to retrieve sources, staying within the tool budget.
 - Normalize each raw tool response to a SourceRecord via source_normalizer.
 - Return a structured ResearchResult (subquestion_answers, claims, gaps).
@@ -29,7 +29,7 @@ from app.schemas import (
     RetryInstruction,
     SourceRecord,
 )
-from app.sglang_client import RESEARCHER_PROFILE, chat
+from app.llm_client import RESEARCHER_PROFILE, chat
 from app.source_normalizer import normalize
 
 logger = logging.getLogger(__name__)

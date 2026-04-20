@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 
 from app.schemas import PlannerOutput, QueryInput
-from app.sglang_client import PLANNER_PROFILE, chat
+from app.llm_client import PLANNER_PROFILE, chat
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ Formatter agent.
 Responsibilities:
 - Accept only the verified and partially_verified claims (filtered by orchestrator).
 - Accept the resolved source references for those claims.
-- Call the SGLang model (via sglang_client) with the formatter prompt.
+- Call the LLM module (via llm_client) with the formatter prompt to produce report sections.
 - Return a structured FinalReport (title, executive_summary, sections, unverified_items, reference_source_ids).
 
 This agent has no MCP tool access. It performs no verification.
@@ -27,7 +27,7 @@ from app.schemas import (
     QueryInput,
     SourceRecord,
 )
-from app.sglang_client import FORMATTER_PROFILE, chat
+from app.llm_client import FORMATTER_PROFILE, chat
 
 logger = logging.getLogger(__name__)
 
