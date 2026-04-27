@@ -55,6 +55,9 @@ REVIEWER_PROFILE = CallProfile(
 FORMATTER_PROFILE = CallProfile(
     name="FORMATTER", temperature=0.0, max_tokens=2000, enable_thinking=False,
 )
+RAG_PROFILE = CallProfile(
+    name="RAG", temperature=0.0, max_tokens=4096, enable_thinking=False,
+)
 
 # ── Return types ───────────────────────────────────────────────────────────────
 
@@ -262,9 +265,11 @@ def _parse_with_retry(
     kwargs: dict,
 ) -> BaseModel | None:
     content = _extract_json(content)
+    parse_error: Exception | None = None
     try:
         return schema.model_validate_json(content)
     except Exception as e:
+        parse_error = e
         logger.warning(f"[llm] Failed to parse output (retrying): {e}")
 
     correction_messages = messages + [
@@ -273,7 +278,7 @@ def _parse_with_retry(
             "role": "user",
             "content": (
                 "Your previous output failed JSON validation. "
-                f"Error: {e}\n"
+                f"Error: {parse_error}\n"
                 "Please fix the error and output ONLY valid JSON matching the schema."
             ),
         },
@@ -288,3 +293,19 @@ def _parse_with_retry(
     except Exception as e2:
         logger.error(f"[llm] Retry also failed to parse: {e2}")
         return None
+
+
+def embed_texts(texts: list[str], model_id: str) -> list[list[float]]:
+    """
+    Embedding vectors via the configured OpenAI-compatible API.
+    Order matches `texts` one-to-one.
+    """
+    if not texts:
+        return []
+    resp = _client.embeddings.create(model=model_id, input=texts)
+    data = list(resp.data)
+    try:
+        data.sort(key=lambda d: d.index)
+    except Exception:
+        pass
+    return [d.embedding for d in data]

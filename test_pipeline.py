@@ -5,5 +5,12 @@ from app.schemas import QueryInput
 logging.basicConfig(level=logging.DEBUG)
 
 if __name__ == "__main__":
-    result = run_pipeline(QueryInput(query="What is the current state of Apple stock?", output_style="memo"))
+    # Folder is resolved relative to the project root (parent of app/), e.g. ./documents
+    result = run_pipeline(
+        QueryInput(
+            query="What is the current state of NVIDIA stock?",
+            output_style="memo",
+            documents_folder="documents",
+        )
+    )
     print(result)

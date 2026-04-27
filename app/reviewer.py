@@ -25,6 +25,7 @@ from app.mcp_client import call_tool, ToolCallError, provider_for_tool
 from app.researcher import _get_tool_defs  # reuse the same cached tool defs
 from app.schemas import (
     ClaimReviewSet,
+    MCPProvider,
     PlannerOutput,
     QueryInput,
     ResearchResult,
@@ -36,6 +37,17 @@ from app.source_normalizer import normalize
 logger = logging.getLogger(__name__)
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "reviewer.txt"
+
+# Non-RAG MCP excerpts stay short to save context. RAG chunks are already capped in
+# ``rag._chunk_to_source`` (~4k); the reviewer must see the full chunk to verify
+# claims that cite ``rag_document`` sources — a 400-char head was hiding evidence.
+_REVIEWER_EXCERPT_NON_RAG = 800
+
+
+def _excerpt_for_review(s: SourceRecord) -> str:
+    if s.provider == MCPProvider.rag_document:
+        return s.raw_excerpt
+    return s.raw_excerpt[:_REVIEWER_EXCERPT_NON_RAG]
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -229,11 +241,12 @@ def _build_prompt(
     # Format sources as a readable list
     source_lines: list[str] = []
     for s in sources:
+        body = _excerpt_for_review(s)
         source_lines.append(
             f"- [{s.source_id}] provider={s.provider.value} tool={s.tool}\n"
             f"  title: {s.title}\n"
             f"  summary: {s.content_summary}\n"
-            f"  excerpt: {s.raw_excerpt[:400]}"
+            f"  excerpt: {body}"
         )
     sources_text = "\n\n".join(source_lines) if source_lines else "(no sources)"
 

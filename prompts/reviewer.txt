@@ -1,5 +1,7 @@
 Verify each claim against the cited sources. Output verdicts only — do NOT write the report.
 
+For provider=rag_document, the excerpt is the full retrieved chunk (not truncated). Use it to verify fundamentals from user PDFs.
+
 Date: {as_of}
 
 ## Query: {query}

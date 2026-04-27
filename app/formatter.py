@@ -104,12 +104,13 @@ def _empty_report(
     claims: list[Claim],
 ) -> FinalReport:
     """Produce a minimal report when no claims were approved."""
-    claim_map = {c.claim_id: c for c in claims}
-    unverified = []
+    _ = claims  # same signature as full formatter path; body uses reviewer notes only
+    unverified = [
+        "Rejected assertions are listed by id only — do not treat quoted figures in "
+        "those claims as facts."
+    ]
     for r in rejected_reviews:
-        original = claim_map.get(r.claim_id)
-        text = original.text if original else r.claim_id
-        unverified.append(f"{text} (verdict: {r.verdict.value} — {r.notes})")
+        unverified.append(f"{r.claim_id} ({r.verdict.value}): {r.notes}")
     unverified.extend(gaps)
 
     from app.schemas import ReportSection

@@ -36,6 +36,7 @@ _PROVIDER_PREFIX: dict[str, str] = {
     MCPProvider.fred:               "fred",
     MCPProvider.financial_datasets: "find",
     MCPProvider.open_web_search:    "webs",
+    MCPProvider.rag_document:       "ragd",
 }
 
 

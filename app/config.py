@@ -23,6 +23,9 @@ if _env_path.exists():
 else:
     load_dotenv(override=True)  # fall back to env vars already in the environment
 
+# ChromaDB: reduce telemetry noise and PostHog client mismatches (chromadb + posthog versions).
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 
 class Settings:
     """
@@ -99,6 +102,35 @@ class Settings:
         )
         # ── Debug ─────────────────────────────────────────────────────────
         self.debug_trace = os.environ.get("DEBUG_TRACE", "").lower() in ("1", "true", "yes")
+
+        # ── RAG (optional embeddings via same OpenAI-compatible API) ─────────
+        emb = os.environ.get("EMBEDDING_MODEL_ID", "").strip()
+        self.embedding_model_id = emb if emb else None
+        self.rag_chunk_size = int(os.environ.get("RAG_CHUNK_SIZE", "1200"))
+        self.rag_chunk_overlap = int(os.environ.get("RAG_CHUNK_OVERLAP", "200"))
+        self.rag_top_k = int(os.environ.get("RAG_TOP_K", "8"))
+        self.rag_max_chunks = int(os.environ.get("RAG_MAX_CHUNKS", "256"))
+        self.rag_use_chroma = os.environ.get("RAG_USE_CHROMA", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        chroma_raw = os.environ.get("CHROMA_RAG_DIR", "data/chroma_rag")
+        self.chroma_rag_path = (
+            Path(chroma_raw)
+            if Path(chroma_raw).is_absolute()
+            else _PROJECT_ROOT / chroma_raw
+        )
+        ext_raw = os.environ.get(
+            "RAG_FOLDER_EXTENSIONS",
+            ".txt,.md,.markdown,.csv,.json,.rst,.pdf",
+        )
+        self.rag_folder_extensions = frozenset(
+            f".{p.strip().lstrip('.').lower()}"
+            for p in ext_raw.split(",")
+            if p.strip()
+        )
+        self.rag_max_file_bytes = int(os.environ.get("RAG_MAX_FILE_BYTES", "5000000"))
     # ── MCP URL lookup helper ──────────────────────────────────────────────────
 
     def mcp_url_for(self, provider: str) -> str:

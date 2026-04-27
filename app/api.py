@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.db import delete_run, get_run, get_sources_for_run, get_claims_for_run, get_reviews_for_run, get_report_for_run
@@ -29,6 +30,8 @@ router = APIRouter()
 class ResearchRequest(BaseModel):
     query: str
     output_style: str = "memo"  # memo | brief | full
+    documents: list[str] | None = None  # optional raw texts — triggers RAG before external research
+    documents_folder: str | None = None  # optional directory path — text files indexed for RAG
 
 
 class ResearchResponse(BaseModel):
@@ -40,11 +43,88 @@ class ResearchResponse(BaseModel):
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+@router.get("/healthz")
+def healthz():
+    """Basic app health endpoint."""
+    return {"status": "ok"}
+
+
+@router.get("/", response_class=HTMLResponse)
+def demo_page():
+    """Simple built-in demo page for class presentations."""
+    return """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finance Research Agent Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; max-width: 900px; }
+    textarea { width: 100%; min-height: q; }
+    button { margin-top: 0.75rem; padding: 0.5rem 1rem; }
+    pre { white-space: pre-wrap; background: #f5f5f5; padding: 1rem; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Finance Research Agent</h1>
+  <p>Class project demo page.</p>
+
+  <label for="query"><strong>Research query</strong></label>
+  <textarea id="query">What is the current state of Apple stock and its outlook?</textarea>
+  <br />
+  <label for="style"><strong>Output style</strong></label>
+  <select id="style">
+    <option value="memo">memo</option>
+    <option value="brief">brief</option>
+    <option value="full">full</option>
+  </select>
+  <br />
+  <button onclick="runResearch()">Run research</button>
+
+  <h2>Result</h2>
+  <pre id="output">No run yet.</pre>
+
+  <script>
+    async function runResearch() {
+      const output = document.getElementById("output");
+      output.textContent = "Running... this can take a few minutes.";
+      const payload = {
+        query: document.getElementById("query").value,
+        output_style: document.getElementById("style").value,
+      };
+      try {
+        const res = await fetch("/research", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          output.textContent = "Error: " + JSON.stringify(data, null, 2);
+          return;
+        }
+        output.textContent = data.markdown || JSON.stringify(data, null, 2);
+      } catch (err) {
+        output.textContent = "Request failed: " + err;
+      }
+    }
+  </script>
+</body>
+</html>
+    """
+
+
 @router.post("/research", response_model=ResearchResponse)
 def research(req: ResearchRequest):
     """Run the full research pipeline and return the markdown report."""
     logger.info(f"Received research request: {req.query!r}")
-    query_input = QueryInput(query=req.query, output_style=req.output_style)
+    query_input = QueryInput(
+        query=req.query,
+        output_style=req.output_style,
+        documents=req.documents,
+        documents_folder=req.documents_folder,
+    )
     result: PipelineResult = run_pipeline(query_input)
     return ResearchResponse(
         run_id=result.run_id,

@@ -2,7 +2,7 @@
 
 A local LLM-powered finance research pipeline that takes a natural-language question about markets, companies, or economics and produces a sourced, reviewed, markdown report — fully offline-capable with no cloud LLM dependency.
 
-The agent decomposes a query into sub-questions, gathers evidence from four specialised MCP (Model Context Protocol) tool servers, verifies each claim against its sources, and assembles a structured report with references.
+The agent decomposes a query into sub-questions, gathers evidence from four specialised MCP (Model Context Protocol) tool servers and optionally from user-supplied documents (RAG), verifies each claim against all collected sources, and assembles a structured report with references.
 
 ---
 
@@ -167,12 +167,13 @@ The `POST /research` endpoint calls `run_pipeline()` in the orchestrator, which 
 
 1. **Cleanup** — Deletes all previous runs from the database (single-run design).
 2. **Plan** — The planner LLM call decomposes the query into research angles, sub-questions, and suggested tools.
-3. **Research** — The researcher enters a tool-calling loop: it calls MCP tools to gather evidence, normalises raw results into `SourceRecord` objects, and produces structured `Claim` objects with source references.
-4. **Review** — The reviewer verifies each claim against the cited sources and assigns a verdict (`verified`, `partially_verified`, `unsupported`, `contradicted`).
-5. **Retry** *(conditional)* — If the reviewer flags too many unsupported claims, the researcher runs a second focused pass with a smaller tool budget, then the reviewer re-evaluates.
-6. **Format** — The formatter builds a structured `FinalReport` from only the approved (verified + partially verified) claims.
-7. **Render** — The renderer converts the `FinalReport` into markdown, resolving source IDs to full metadata (title, provider, URL).
-8. **Persist** — The report is saved to both the SQLite database and as a markdown file at `reports/{run_id}.md`.
+3. **RAG** *(optional)* — If the request includes `documents` (inline text) and/or `documents_folder` (path to files), the pipeline retrieves chunks from that corpus and runs a structured extraction pass (`app/rag.py`). Output is merged with MCP research when RAG is only partial, or when the query clearly needs **live market data** (e.g. current share price, “current state of … stock”) — in those cases the MCP researcher **always** runs as well, even if RAG labelled its answer `complete`, so PDFs and tools are combined.
+4. **Research (MCP)** — When RAG is off, incomplete, or supplemented for live data: the researcher enters a tool-calling loop over MCP tools, normalises results into `SourceRecord` objects, and produces `Claim` rows with source references. Claims from RAG and MCP are merged before review.
+5. **Review** — The reviewer sees **every** source (RAG `rag_document` chunks plus MCP rows). For user-document chunks it receives the **full** chunk text in its prompt (not a short head), so claims tied to PDF excerpts can be verified. It assigns a verdict per claim (`verified`, `partially_verified`, `unsupported`, `contradicted`) and may make a small number of extra MCP calls for re-checks.
+6. **Retry** *(conditional)* — If the reviewer flags too many unsupported claims, the researcher runs a second focused pass with a smaller tool budget, then the reviewer re-evaluates.
+7. **Format** — The formatter builds a structured `FinalReport` from only the approved (verified + partially verified) claims. If **no** claims are approved, it emits a minimal report: caveats list **claim ids and reviewer notes** only (not the full rejected claim text), so unsupported numbers are not echoed as if they were vetted facts.
+8. **Render** — The renderer converts the `FinalReport` into markdown, resolving source IDs to full metadata (title, provider, URL).
+9. **Persist** — The report is saved to both the SQLite database and as a markdown file at `reports/{run_id}.md`.
 
 ---
 
@@ -249,7 +250,7 @@ When `DEBUG_TRACE=true` is set in `.env`, the agent logs a detailed trace of eve
 The trace log includes:
 
 - **`NEW RUN`** — Run ID and query
-- **`PHASE`** — Phase transitions (PLANNER, RESEARCHER, REVIEWER, FORMATTER, RENDERER)
+- **`PHASE`** — Phase transitions (PLANNER, RAG, RESEARCHER, REVIEWER, RETRY, FORMATTER, RENDERER)
 - **`LLM_REQUEST`** — Full messages sent to the model, schema name, tool definitions
 - **`LLM_RESPONSE`** — Raw model output, tool calls, parsed structured data
 - **`TOOL_CALL`** — MCP tool name, arguments, target provider
@@ -303,7 +304,8 @@ To enable/disable: set `DEBUG_TRACE=true` or `DEBUG_TRACE=false` in `.env` and r
 | Phase | Module | LLM Call | Tools | Output |
 |---|---|---|---|---|
 | **Plan** | `app/planner.py` | 1 call (temp=0) | None | `PlannerOutput` — angles, sub-questions, suggested tools |
-| **Research** | `app/researcher.py` | Multi-turn loop | Up to `RESEARCHER_TOOL_BUDGET` | `ResearchResult` — claims with source IDs, gaps |
+| **RAG** *(optional)* | `app/rag.py` | 1–2 calls (temp=0) | Embeddings / Chroma / lexical retrieval | `ResearchResult` fragment + `rag_document` `SourceRecord`s |
+| **Research** | `app/researcher.py` | Multi-turn loop | Up to `RESEARCHER_TOOL_BUDGET` | `ResearchResult` — claims with source IDs, gaps (merged with RAG when both run) |
 | **Review** | `app/reviewer.py` | 1–2 calls (thinking enabled) | Up to `REVIEWER_TOOL_BUDGET` | `ClaimReviewSet` — verdicts per claim, retry decision |
 | **Retry** *(optional)* | `app/researcher.py` | Multi-turn loop | Up to `RETRY_TOOL_BUDGET` | Additional claims + sources |
 | **Format** | `app/formatter.py` | 1 call (temp=0) | None | `FinalReport` — structured report from approved claims |
@@ -317,13 +319,15 @@ To enable/disable: set `DEBUG_TRACE=true` or `DEBUG_TRACE=false` in `.env` and r
 | `app/schemas.py` | All Pydantic models — `PlannerOutput`, `Claim`, `ClaimReview`, `FinalReport`, etc. |
 | `app/models.py` | Database row models — `Run`, `Source`, `Claim`, `Review`, `Report` |
 | `app/db.py` | SQLite persistence layer (WAL mode), all CRUD operations |
-| `app/sglang_client.py` | OpenAI-compatible LLM client with structured output, tool calling, and thinking support |
+| `app/llm_client.py` | OpenAI-compatible LLM client with structured output, tool calling, thinking, and optional embeddings |
+| `app/rag.py` | Optional document RAG: chunking, retrieval, structured claim extraction |
+| `app/rag_corpus.py`, `app/rag_vector_store.py` | Document corpus paths and optional Chroma vector retrieval |
 | `app/mcp_client.py` | Routes tool calls to the correct MCP server, handles retries and errors |
 | `app/source_normalizer.py` | Transforms raw MCP responses into normalised `SourceRecord` objects |
 | `app/trace.py` | Debug trace logger (enabled via `DEBUG_TRACE` env var) |
 | `prompts/*.txt` | System prompt templates for each LLM phase |
 
-### LLM Client (`app/sglang_client.py`)
+### LLM Client (`app/llm_client.py`)
 
 The LLM client wraps the OpenAI Python SDK and supports:
 
@@ -342,8 +346,10 @@ Raw MCP tool responses are heterogeneous (each server returns different JSON sha
 - **source_id** — Deterministic: `{run_id[:8]}-{provider_prefix}-{uuid[:8]}`
 - **title, uri, entity** — Extracted per provider
 - **content_summary** — Short text summary for the LLM
-- **raw_excerpt** — Truncated raw data (max 500 chars) for the reviewer
+- **raw_excerpt** — Short verbatim slice for storage and UI; length varies by provider (MCP normalisers often cap around 600 characters)
 - **structured_payload** — Full original JSON (stored in DB, not sent to LLM)
+
+**Reviewer prompt:** When building the review prompt, `rag_document` sources use the **entire** stored chunk excerpt (up to the RAG chunk cap) so PDF-backed claims can be checked against the same text the researcher saw. Other providers use a bounded excerpt in the review prompt (see `app/reviewer.py`).
 
 ---
 
@@ -429,6 +435,13 @@ Start a new research run.
 }
 ```
 
+Optional fields for user-provided evidence (RAG before / alongside MCP):
+
+| Field | Type | Effect |
+|---|---|---|
+| `documents` | `list[str]` | Inline document bodies; chunked and retrieved like files |
+| `documents_folder` | `string` | Path to a directory of text-capable files (e.g. PDFs) indexed for retrieval |
+
 `output_style` options: `memo` (default — executive summary + sections), `brief` (2-4 sentences), `full` (detailed report).
 
 **Response:**
@@ -475,14 +488,17 @@ Finance_research_agent/
 │   ├── orchestrator.py      # Pipeline coordinator
 │   ├── planner.py           # Query decomposition
 │   ├── researcher.py        # Tool-calling research loop
-│   ├── reviewer.py          # Claim verification
+│   ├── reviewer.py          # Claim verification (full RAG excerpts in prompt)
 │   ├── formatter.py         # Structured report builder
 │   ├── renderer.py          # Markdown renderer
+│   ├── rag.py               # Optional document RAG phase
+│   ├── rag_corpus.py        # Corpus loading from inline text / folder
+│   ├── rag_vector_store.py  # Optional Chroma indexing & query
 │   ├── config.py            # Settings & env vars
 │   ├── db.py                # SQLite persistence
 │   ├── models.py            # DB row models
 │   ├── schemas.py           # Pydantic schemas
-│   ├── sglang_client.py     # LLM client (OpenAI-compatible)
+│   ├── llm_client.py        # LLM client (OpenAI-compatible)
 │   ├── mcp_client.py        # MCP tool routing & execution
 │   ├── source_normalizer.py # Raw response → SourceRecord
 │   └── trace.py             # Debug trace logger
@@ -495,7 +511,8 @@ Finance_research_agent/
 │   ├── planner.txt          # Planner system prompt
 │   ├── researcher.txt       # Researcher system prompt
 │   ├── reviewer.txt         # Reviewer system prompt
-│   └── formatter.txt        # Formatter system prompt
+│   ├── formatter.txt        # Formatter system prompt
+│   └── rag.txt              # RAG extraction system prompt
 ├── data/                    # SQLite database
 ├── reports/                 # Saved markdown reports
 ├── logs/                    # Debug trace & MCP server logs

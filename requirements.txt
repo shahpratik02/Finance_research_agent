@@ -3,6 +3,9 @@ annotated-types==0.7.0
 anyio==4.13.0
 beautifulsoup4==4.14.3
 certifi==2026.2.25
+chromadb==0.5.23
+# Chroma 0.5 telemetry calls PostHog; posthog 3.x breaks capture() signature for that client.
+posthog>=2.4.0,<3.0.0
 cffi==2.0.0
 charset-normalizer==3.4.7
 click==8.3.2
@@ -23,8 +26,10 @@ openai==2.31.0
 pandas==3.0.2
 peewee==4.0.4
 platformdirs==4.9.6
-protobuf==7.34.1
+# ChromaDB 0.5.x requires protobuf <= 3.20.x (newer protobuf breaks generated protos).
+protobuf==3.20.3
 pycparser==3.0
+pypdf==5.1.0
 pydantic==2.12.5
 pydantic-settings==2.13.1
 pydantic_core==2.41.5

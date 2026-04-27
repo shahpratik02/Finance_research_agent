@@ -54,6 +54,7 @@ class MCPProvider(str, Enum):
     fred               = "fred"
     financial_datasets = "financial_datasets"
     open_web_search    = "open_web_search"
+    rag_document       = "rag_document"  # user-supplied chunks (not from MCP)
 
 
 # ── Input ──────────────────────────────────────────────────────────────────────
@@ -68,6 +69,20 @@ class QueryInput(BaseModel):
     output_style: OutputStyle = Field(
         default=OutputStyle.memo,
         description="Controls the length and structure of the final report.",
+    )
+    documents: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional raw document texts. When provided (non-empty), the pipeline runs "
+            "retrieval over these docs before external research."
+        ),
+    )
+    documents_folder: str | None = Field(
+        default=None,
+        description=(
+            "Optional path to a directory of text files to index for RAG (merged with "
+            "`documents` when both are set). Uses a local vector store when embeddings are configured."
+        ),
     )
 
 
@@ -146,6 +161,33 @@ class ResearchResult(BaseModel):
     gaps: list[str] = Field(
         default_factory=list,
         description="Things the Researcher could not find evidence for.",
+    )
+
+
+class RagAdequacy(str, Enum):
+    """Whether retrieved documents fully answer the query."""
+    complete = "complete"  # docs alone suffice
+    partial = "partial"    # docs help but external research is needed
+    none = "none"          # docs do not answer the question
+
+
+class RagPhaseOutput(BaseModel):
+    """
+    Structured output of the RAG extraction pass (same evidence shape as ResearchResult,
+    plus an adequacy judgment).
+    """
+    adequacy: RagAdequacy = Field(
+        ...,
+        description=(
+            "complete: user documents fully answer the query; partial: only some angles "
+            "or evidence; none: documents are irrelevant or insufficient."
+        ),
+    )
+    subquestion_answers: list[SubquestionAnswer]
+    claims: list[Claim]
+    gaps: list[str] = Field(
+        default_factory=list,
+        description="Topics still unclear from the retrieved passages alone.",
     )
 
 

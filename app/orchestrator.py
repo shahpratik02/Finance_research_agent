@@ -3,7 +3,8 @@ Pipeline orchestrator.
 
 Responsibilities:
 - Coordinate the full research pipeline for a single user query.
-- Call: planner → researcher → reviewer → (optional retry) → formatter → renderer.
+- Call: planner → (optional RAG on user documents) → researcher → reviewer → (optional retry) → formatter → renderer.
+  When inline ``documents`` and/or ``documents_folder`` is set, RAG runs first; if it reports a complete answer from those sources alone, the MCP researcher step is skipped.
 - Build the RetryInstruction when the Reviewer requests a retry.
 - Save all artifacts (sources, claims, reviews, final report) to SQLite via db.py.
 - Return the completed run artifact.
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +41,7 @@ from app.models import Review as ReviewRow
 from app.models import Run, RunStatus
 from app.models import Source as SourceRow
 from app.planner import plan
+from app.rag import run_rag_phase, should_run_rag
 from app.renderer import render
 from app.researcher import research
 from app.reviewer import review
@@ -48,6 +51,7 @@ from app.schemas import (
     FinalReport,
     PlannerOutput,
     QueryInput,
+    RagAdequacy,
     ResearchResult,
     RetryInstruction,
     SourceRecord,
@@ -55,6 +59,32 @@ from app.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Queries that still need MCP (quotes, session, “current state” of a ticker) even when
+# RAG marks user PDFs as fully answering — static filings alone are not enough.
+_LIVE_MARKET_PHRASE = re.compile(
+    r"\b("
+    r"stock\s+price|share\s+price|last\s+price|closing\s+price|"
+    r"live\s+quote|after[-\s]?hours|pre[-\s]?market|intraday"
+    r")\b",
+    re.I,
+)
+_CURRENT_STOCK_STATE = re.compile(
+    r"\bcurrent\s+state\s+of\b.*\bstock\b|\bstock\b.*\b(current|latest|today)\b",
+    re.I | re.S,
+)
+
+
+def _query_needs_live_market_mcp(query: str) -> bool:
+    """True when Yahoo / web tools should run alongside document RAG."""
+    q = (query or "").strip()
+    if not q:
+        return False
+    if _LIVE_MARKET_PHRASE.search(q):
+        return True
+    if _CURRENT_STOCK_STATE.search(q):
+        return True
+    return False
 
 
 # ── Result type ────────────────────────────────────────────────────────────────
@@ -78,7 +108,9 @@ def run_pipeline(query_input: QueryInput) -> PipelineResult:
     Steps:
         1. Create run record
         2. Plan (subquestions + tools)
-        3. Research (gather evidence, produce claims)
+        3. If inline documents and/or a ``documents_folder`` path is provided: RAG over that
+           corpus; if not a complete answer, run the MCP researcher and merge with RAG output.
+           Otherwise research only via MCP.
         4. Review (verify claims)
         5. Optional single retry if reviewer requests it
         6. Format (write report from approved claims only)
@@ -110,16 +142,49 @@ def run_pipeline(query_input: QueryInput) -> PipelineResult:
         trace_phase("PLANNER", f"query={query_input.query!r}")
         planner_output = plan(query_input)
 
-        # 3. Research (initial pass)
-        logger.info("[orchestrator] Phase: RESEARCHER (initial)")
-        trace_phase("RESEARCHER", "initial pass")
-        research_result, research_sources = research(
-            query_input, planner_output, run_id,
-        )
-        all_sources: list[SourceRecord] = list(research_sources)
+        # 3. Optional RAG on user documents, then Researcher (unless RAG is complete)
+        rag_sources: list[SourceRecord] = []
 
-        # Save sources from initial pass
-        _save_sources(run_id, research_sources)
+        if should_run_rag(query_input):
+            logger.info("[orchestrator] Phase: RAG")
+            trace_phase("RAG", "inline documents and/or documents_folder")
+            rag_adequacy, rag_result, rag_sources = run_rag_phase(
+                query_input, planner_output, run_id,
+            )
+            _save_sources(run_id, rag_sources)
+
+            if rag_adequacy == RagAdequacy.complete and not _query_needs_live_market_mcp(
+                query_input.query
+            ):
+                logger.info("[orchestrator] Phase: RESEARCHER (skipped — RAG complete)")
+                trace_phase("RESEARCHER", "skipped")
+                research_result = rag_result
+                research_sources: list[SourceRecord] = []
+            else:
+                if rag_adequacy == RagAdequacy.complete:
+                    logger.info(
+                        "[orchestrator] Phase: RESEARCHER (RAG complete but query needs "
+                        "live market data — running MCP and merging)"
+                    )
+                    trace_phase("RESEARCHER", "MCP merge after RAG complete (live data)")
+                else:
+                    logger.info("[orchestrator] Phase: RESEARCHER (initial, after partial/no RAG)")
+                    trace_phase("RESEARCHER", "initial pass")
+                research_result, research_sources = research(
+                    query_input, planner_output, run_id,
+                )
+                research_result = _merge_research_results(rag_result, research_result)
+                _save_sources(run_id, research_sources)
+        else:
+            logger.info("[orchestrator] Phase: RESEARCHER (initial)")
+            trace_phase("RESEARCHER", "initial pass")
+            research_result, research_sources = research(
+                query_input, planner_output, run_id,
+            )
+            _save_sources(run_id, research_sources)
+
+        all_sources: list[SourceRecord] = list(rag_sources)
+        all_sources.extend(research_sources)
 
         # 4. Review
         logger.info("[orchestrator] Phase: REVIEWER")
