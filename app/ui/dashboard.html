@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finance Research Agent Dashboard</title>
+  <style>
+    :root {
+      --bg: #030712;
+      --panel: #0b1220;
+      --panel-soft: #101828;
+      --border: #1f2a44;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Inter, Arial, sans-serif; margin: 1.2rem auto; max-width: 1180px; color: var(--text); background: radial-gradient(circle at top, #0b1326 0%, var(--bg) 48%); padding: 0 0.8rem; }
+    h1 { margin: 0 0 0.3rem 0; font-size: 2rem; }
+    h2 { margin: 0.2rem 0 0.8rem; font-size: 1.65rem; }
+    h3 { margin: 0; font-size: 1.1rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .card { border: 1px solid var(--border); border-radius: 14px; padding: 1rem; background: linear-gradient(180deg, rgba(16,24,40,0.95), rgba(11,18,32,0.95)); box-shadow: 0 8px 25px rgba(0,0,0,0.25); }
+    textarea, input, select { width: 100%; margin-top: 0.35rem; margin-bottom: 0.75rem; padding: 0.58rem 0.65rem; border: 1px solid #334155; border-radius: 10px; background: #111827; color: var(--text); }
+    textarea { min-height: 122px; font-family: inherit; resize: vertical; }
+    .actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.3rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+    button { padding: 0.52rem 0.9rem; border: 1px solid transparent; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #1f2937; border-color: #334155; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status-chip { padding: 0.12rem 0.5rem; border-radius: 999px; font-size: 0.82rem; font-weight: 700; border: 1px solid #334155; }
+    .status-idle { color: var(--muted); background: #111827; }
+    .status-queued, .status-running { color: #fde68a; background: #3b2f12; border-color: #a16207; }
+    .status-completed { color: #86efac; background: #0f2b1c; border-color: #15803d; }
+    .status-failed, .status-error { color: #fca5a5; background: #321118; border-color: #b91c1c; }
+    .meta { color: var(--muted); font-size: 0.92rem; margin-bottom: 0.6rem; }
+    .kvs { display: flex; flex-wrap: wrap; gap: 0.7rem; margin: 0.5rem 0 0.7rem; }
+    /* One row: title left, auto-scroll right — toggle has flex-shrink: 0 so label never clips */
+    .logs-section { margin: 0.6rem 0 0.45rem; min-width: 0; }
+    .logs-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+    .logs-section-header h3 {
+      margin: 0;
+      font-size: 1.1rem;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .log-scroll-toggle {
+      flex: 0 0 auto;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin: 0;
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.9rem;
+    }
+    .log-scroll-toggle input { flex-shrink: 0; width: 1rem; height: 1rem; }
+    @media (max-width: 480px) {
+      .logs-section-header { flex-wrap: wrap; }
+      .log-scroll-toggle { margin-left: auto; }
+    }
+    pre { white-space: pre-wrap; word-break: break-word; background: #08101f; color: #e2e8f0; padding: 1rem; border-radius: 10px; min-height: 320px; max-height: 520px; overflow: auto; border: 1px solid #1f2a44; margin: 0; }
+    #mdPreview { white-space: normal; background: #08101f; border: 1px solid #1f2a44; color: #e2e8f0; padding: 1rem; border-radius: 10px; min-height: 440px; max-height: 700px; overflow: auto; line-height: 1.6; }
+    #mdPreview h1, #mdPreview h2, #mdPreview h3 { color: #f8fafc; margin-top: 1rem; margin-bottom: 0.5rem; }
+    #mdPreview p, #mdPreview li { color: #e2e8f0; }
+    #mdPreview code { background: #111827; padding: 0.08rem 0.3rem; border-radius: 4px; }
+    #mdPreview pre { background: #111827; border: 1px solid #1f2937; max-height: none; min-height: 0; margin: 0.75rem 0; }
+    #mdPreview a { color: #93c5fd; }
+    .subtle { color: var(--muted); font-size: 0.85rem; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Finance Research Agent</h1>
+  <p class="meta">Run a query, optionally provide a documents folder, watch live phase/MCP/RAG logs, and preview markdown reports.</p>
+  <div class="grid">
+    <div class="card">
+      <h2>Run Query</h2>
+      <label for="query"><strong>Query</strong></label>
+      <textarea id="query">What is the current state of GOOGLE stock and expected future growth?</textarea>
+      <label for="documents_folder"><strong>Documents folder (optional)</strong></label>
+      <input id="documents_folder" placeholder="documents" />
+      <label for="style"><strong>Output style</strong></label>
+      <select id="style">
+        <option value="memo">memo</option>
+        <option value="brief">brief</option>
+        <option value="full">full</option>
+      </select>
+      <div class="actions">
+        <button id="runBtn" onclick="startRun()">Start run</button>
+        <button class="secondary" onclick="clearLogs()">Clear logs</button>
+      </div>
+      <div class="kvs">
+        <div>Status: <span id="jobStatus" class="status-chip status-idle">idle</span></div>
+        <div>Job: <span id="jobId">-</span></div>
+        <div>Run: <span id="runId">-</span></div>
+      </div>
+      <div class="logs-section">
+        <div class="logs-section-header">
+          <h3>Live Agent Logs</h3>
+          <label class="subtle log-scroll-toggle" title="Keep the log view scrolled to the bottom while a run is active">
+            <input type="checkbox" id="autoScroll" checked />
+            <span>Auto-scroll logs</span>
+          </label>
+        </div>
+      </div>
+      <pre id="liveLogs">No run started.</pre>
+    </div>
+    <div class="card">
+      <h2>Markdown Preview</h2>
+      <label for="reportSelect"><strong>Saved reports</strong></label>
+      <select id="reportSelect" onchange="loadSelectedReport()"></select>
+      <div class="actions">
+        <button class="secondary" onclick="copyRenderedMarkdown()">Copy markdown</button>
+        <button class="secondary" onclick="downloadRenderedMarkdown()">Download .md</button>
+      </div>
+      <div id="mdPreview">No report selected.</div>
+    </div>
+  </div>
+
+  <script>
+    let currentJobId = null;
+    let pollTimer = null;
+    let currentMarkdown = "";
+
+    function setStatus(status) {
+      const el = document.getElementById("jobStatus");
+      el.textContent = status;
+      el.className = `status-chip status-${status}`;
+      if (!["idle","queued","running","completed","failed","error"].includes(status)) {
+        el.className = "status-chip status-idle";
+      }
+    }
+
+    function clearLogs() {
+      document.getElementById("liveLogs").textContent = "Logs cleared.";
+    }
+
+    function copyRenderedMarkdown() {
+      if (!currentMarkdown) return;
+      navigator.clipboard.writeText(currentMarkdown).catch(() => {});
+    }
+
+    function downloadRenderedMarkdown() {
+      if (!currentMarkdown) return;
+      const runId = document.getElementById("runId").textContent || "report";
+      const blob = new Blob([currentMarkdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${runId}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function refreshReportList(preferRunId = null) {
+      const sel = document.getElementById("reportSelect");
+      const res = await fetch("/ui/reports");
+      const data = await res.json();
+      sel.innerHTML = "";
+      if (!data.reports.length) {
+        const op = document.createElement("option");
+        op.value = "";
+        op.textContent = "No reports yet";
+        sel.appendChild(op);
+        document.getElementById("mdPreview").textContent = "No report selected.";
+        currentMarkdown = "";
+        return;
+      }
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select a report";
+      sel.appendChild(placeholder);
+      data.reports.forEach(r => {
+        const op = document.createElement("option");
+        op.value = r.run_id;
+        op.textContent = `${r.run_id} (${r.updated_at})`;
+        sel.appendChild(op);
+      });
+      if (preferRunId) {
+        sel.value = preferRunId;
+        await loadSelectedReport();
+      } else {
+        sel.value = "";
+        document.getElementById("mdPreview").textContent = "No report selected.";
+        currentMarkdown = "";
+      }
+    }
+
+    async function loadSelectedReport() {
+      const runId = document.getElementById("reportSelect").value;
+      if (!runId) {
+        document.getElementById("mdPreview").textContent = "No report selected.";
+        currentMarkdown = "";
+        return;
+      }
+      const res = await fetch(`/ui/reports/${runId}`);
+      const data = await res.json();
+      document.getElementById("mdPreview").innerHTML = data.markdown_html || "<p>No markdown</p>";
+      currentMarkdown = data.markdown || "";
+    }
+
+    async function startRun() {
+      if (pollTimer) clearInterval(pollTimer);
+      document.getElementById("runBtn").disabled = true;
+      setStatus("queued");
+      document.getElementById("runId").textContent = "-";
+      document.getElementById("liveLogs").textContent = "Queued run...";
+      const payload = {
+        query: document.getElementById("query").value,
+        output_style: document.getElementById("style").value,
+        documents_folder: (document.getElementById("documents_folder").value || "").trim() || null,
+      };
+      try {
+        const res = await fetch("/ui/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          document.getElementById("liveLogs").textContent = "Error: " + JSON.stringify(data, null, 2);
+          setStatus("error");
+          document.getElementById("runBtn").disabled = false;
+          return;
+        }
+        currentJobId = data.job_id;
+        document.getElementById("jobId").textContent = currentJobId;
+        pollTimer = setInterval(pollJob, 1000);
+        await pollJob();
+      } catch (err) {
+        document.getElementById("liveLogs").textContent = "Request failed: " + err;
+        setStatus("error");
+        document.getElementById("runBtn").disabled = false;
+      }
+    }
+
+    async function pollJob() {
+      if (!currentJobId) return;
+      const res = await fetch(`/ui/jobs/${currentJobId}`);
+      const data = await res.json();
+      setStatus(data.status || "idle");
+      const logsEl = document.getElementById("liveLogs");
+      logsEl.textContent = (data.logs || []).join("\n") || "No logs yet";
+      if (document.getElementById("autoScroll").checked) {
+        logsEl.scrollTop = logsEl.scrollHeight;
+      }
+      if (data.result && data.result.run_id) {
+        document.getElementById("runId").textContent = data.result.run_id;
+      }
+      if (data.status === "completed" || data.status === "failed") {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        document.getElementById("runBtn").disabled = false;
+        if (data.result && data.result.markdown_html) {
+          document.getElementById("mdPreview").innerHTML = data.result.markdown_html;
+          currentMarkdown = data.result.markdown || "";
+        }
+        await refreshReportList(data.result ? data.result.run_id : null);
+      }
+    }
+
+    document.getElementById("reportSelect").innerHTML = "<option value=''>No report selected</option>";
+  </script>
+</body>
+</html>

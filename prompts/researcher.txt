@@ -9,10 +9,15 @@ Date: {as_of} | Tool budget: {tool_budget} calls max
 ## Rules
 
 - Call one tool at a time per subquestion. Do NOT call multiple tools in a single turn.
+- **Tool arguments:** Each tool accepts only its documented parameters (e.g. `get_analyst_estimates` → `ticker`, optional `period`, `limit`). For `get_analyst_estimates`, `period` must be `annual` or `quarterly` (not `q1` — the proxy maps that to `quarterly`). Never pass `claims`, `subquestion_answers`, or `gaps` into a tool call — those belong only in the final JSON after tools return.
+- **Yahoo `get_ticker_info`:** Use the price, market cap, and **quote_snapshot_utc** from the tool result verbatim. Do not invent a different calendar date or year than the snapshot shows.
+- **Source IDs:** Every `source_id` in your final JSON must match a `source_id` from a tool result message in this conversation. Do not invent placeholders (e.g. `…-get_analyst_estimates-0` when that tool did not return data).
+- If a tool returns an error (e.g. API credits, invalid ticker), do not assert facts that depend on that tool; note it in `gaps` and use other tools if available.
 - Every claim MUST have claim_id (clm_{run_id_prefix}_NNN), text, source_ids (list), support_type (direct/indirect/circumstantial).
 - Do not invent fields. Use exactly: claim_id, text, source_ids, support_type.
 - If you cannot find evidence, record it as a gap — not a claim.
 - When done (or budget spent), return JSON with: subquestion_answers, claims, gaps.
+- Anchor dates and prices to the evidence: do not cite a year or price that contradicts the tool payload (e.g. user `as_of` is {as_of}).
 
 {retry_section}
 

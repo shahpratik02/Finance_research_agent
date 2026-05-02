@@ -168,7 +168,9 @@ def run_rag_phase(
         )
 
     parsed = result.parsed
-    if not parsed.claims and sources:
+    # Do not retry when the model already judged docs irrelevant (adequacy none).
+    # A follow-up "must include at least one claim" would force wrong-entity or hallucinated facts.
+    if not parsed.claims and sources and parsed.adequacy != RagAdequacy.none:
         logger.warning(
             "[rag] RAG extractor returned zero claims with non-empty passages; retrying once"
         )
@@ -177,7 +179,10 @@ def run_rag_phase(
             "role": "user",
             "content": (
                 "Your last output had zero claims but passages are present. "
-                "Output RagPhaseOutput again: include at least one Claim quoting "
+                "If the excerpts concern a different company or ticker than the user query, "
+                "keep adequacy none and zero claims and explain in gaps — never attribute "
+                "those excerpts to the queried company. "
+                "Otherwise output RagPhaseOutput again: include at least one Claim quoting "
                 "specific numbers or fiscal periods from the excerpts, each claim "
                 f"citing only these source_ids: {source_ids_line}. "
                 "If the query asks for stock price or live market state but the PDF "

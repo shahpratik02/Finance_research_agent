@@ -11,9 +11,15 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+import threading
+from datetime import datetime, timezone
+from html import escape
+from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
+from markdown_it import MarkdownIt
 from pydantic import BaseModel
 
 from app.db import delete_run, get_run, get_sources_for_run, get_claims_for_run, get_reviews_for_run, get_report_for_run
@@ -23,6 +29,14 @@ from app.schemas import QueryInput
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+_ROOT = Path(__file__).resolve().parent.parent
+_APP_DIR = Path(__file__).resolve().parent
+_DASHBOARD_HTML = _APP_DIR / "ui" / "dashboard.html"
+_REPORTS_DIR = _ROOT / "reports"
+_UI_LOCK = threading.Lock()
+_UI_JOBS: dict[str, dict] = {}
+_MAX_JOB_LOGS = 800
+_MD = MarkdownIt("commonmark", {"html": False})
 
 
 # ── Request / Response models ──────────────────────────────────────────────────
@@ -41,6 +55,104 @@ class ResearchResponse(BaseModel):
     error: str | None = None
 
 
+class UIRunRequest(BaseModel):
+    query: str
+    output_style: str = "memo"
+    documents_folder: str | None = None
+
+
+class UIJobStartResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+# ── UI run tracking ────────────────────────────────────────────────────────────
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _append_log(job_id: str, line: str) -> None:
+    with _UI_LOCK:
+        job = _UI_JOBS.get(job_id)
+        if not job:
+            return
+        logs = job.setdefault("logs", [])
+        logs.append(line)
+        if len(logs) > _MAX_JOB_LOGS:
+            job["logs"] = logs[-_MAX_JOB_LOGS:]
+
+
+class _ThreadLogHandler(logging.Handler):
+    """Capture logs emitted from the worker thread handling one UI job."""
+
+    def __init__(self, job_id: str, thread_id: int) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.thread_id = thread_id
+        self.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.thread != self.thread_id:
+            return
+        try:
+            msg = self.format(record)
+        except Exception:
+            msg = str(record.getMessage())
+        _append_log(self.job_id, msg)
+
+
+def _run_ui_job(job_id: str, req: UIRunRequest) -> None:
+    thread_id = threading.get_ident()
+    handler = _ThreadLogHandler(job_id, thread_id)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+    try:
+        with _UI_LOCK:
+            job = _UI_JOBS[job_id]
+            job["status"] = "running"
+            job["started_at"] = _iso_now()
+        _append_log(job_id, f"{_iso_now()} [ui] INFO Started UI job {job_id}")
+
+        result = run_pipeline(
+            QueryInput(
+                query=req.query,
+                output_style=req.output_style,
+                documents_folder=req.documents_folder or None,
+            )
+        )
+        with _UI_LOCK:
+            job = _UI_JOBS[job_id]
+            job["status"] = "completed" if result.status == "completed" else "failed"
+            job["completed_at"] = _iso_now()
+            try:
+                markdown_html = _MD.render(result.markdown or "")
+            except Exception:
+                markdown_html = f"<pre>{escape(result.markdown or '')}</pre>"
+            job["result"] = {
+                "run_id": result.run_id,
+                "status": result.status,
+                "markdown": result.markdown,
+                "markdown_html": markdown_html,
+                "error": result.error,
+            }
+    except Exception as e:
+        logger.exception("[ui] Background run failed")
+        with _UI_LOCK:
+            job = _UI_JOBS[job_id]
+            job["status"] = "failed"
+            job["completed_at"] = _iso_now()
+            job["result"] = {
+                "run_id": None,
+                "status": "failed",
+                "markdown": "",
+                "markdown_html": "<p>No markdown</p>",
+                "error": str(e),
+            }
+    finally:
+        root_logger.removeHandler(handler)
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.get("/healthz")
@@ -51,68 +163,17 @@ def healthz():
 
 @router.get("/", response_class=HTMLResponse)
 def demo_page():
-    """Simple built-in demo page for class presentations."""
-    return """
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Finance Research Agent Demo</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; max-width: 900px; }
-    textarea { width: 100%; min-height: q; }
-    button { margin-top: 0.75rem; padding: 0.5rem 1rem; }
-    pre { white-space: pre-wrap; background: #f5f5f5; padding: 1rem; border-radius: 8px; }
-  </style>
-</head>
-<body>
-  <h1>Finance Research Agent</h1>
-  <p>Class project demo page.</p>
-
-  <label for="query"><strong>Research query</strong></label>
-  <textarea id="query">What is the current state of Apple stock and its outlook?</textarea>
-  <br />
-  <label for="style"><strong>Output style</strong></label>
-  <select id="style">
-    <option value="memo">memo</option>
-    <option value="brief">brief</option>
-    <option value="full">full</option>
-  </select>
-  <br />
-  <button onclick="runResearch()">Run research</button>
-
-  <h2>Result</h2>
-  <pre id="output">No run yet.</pre>
-
-  <script>
-    async function runResearch() {
-      const output = document.getElementById("output");
-      output.textContent = "Running... this can take a few minutes.";
-      const payload = {
-        query: document.getElementById("query").value,
-        output_style: document.getElementById("style").value,
-      };
-      try {
-        const res = await fetch("/research", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          output.textContent = "Error: " + JSON.stringify(data, null, 2);
-          return;
-        }
-        output.textContent = data.markdown || JSON.stringify(data, null, 2);
-      } catch (err) {
-        output.textContent = "Request failed: " + err;
-      }
-    }
-  </script>
-</body>
-</html>
-    """
+    """Built-in dashboard UI for running and monitoring pipeline jobs."""
+    if not _DASHBOARD_HTML.is_file():
+        return HTMLResponse(
+            content="<p>Dashboard template missing: app/ui/dashboard.html</p>",
+            status_code=500,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+    return HTMLResponse(
+        content=_DASHBOARD_HTML.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @router.post("/research", response_model=ResearchResponse)
@@ -132,6 +193,74 @@ def research(req: ResearchRequest):
         markdown=result.markdown,
         error=result.error,
     )
+
+
+@router.post("/ui/jobs", response_model=UIJobStartResponse)
+def start_ui_job(req: UIRunRequest):
+    """Queue a background pipeline run for the dashboard UI."""
+    job_id = uuid4().hex[:12]
+    with _UI_LOCK:
+        _UI_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "created_at": _iso_now(),
+            "started_at": None,
+            "completed_at": None,
+            "request": req.model_dump(),
+            "logs": [],
+            "result": None,
+        }
+    t = threading.Thread(target=_run_ui_job, args=(job_id, req), daemon=True)
+    t.start()
+    return UIJobStartResponse(job_id=job_id, status="queued")
+
+
+@router.get("/ui/jobs/{job_id}")
+def get_ui_job(job_id: str):
+    """Get live status + captured logs for a dashboard job."""
+    with _UI_LOCK:
+        job = _UI_JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="UI job not found")
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "created_at": job["created_at"],
+            "started_at": job["started_at"],
+            "completed_at": job["completed_at"],
+            "logs": list(job.get("logs", [])),
+            "result": job.get("result"),
+        }
+
+
+@router.get("/ui/reports")
+def list_report_markdown_files():
+    """List markdown report files for quick UI preview."""
+    if not _REPORTS_DIR.exists():
+        return {"reports": []}
+    rows: list[dict] = []
+    for path in sorted(_REPORTS_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        run_id = path.stem
+        rows.append({
+            "run_id": run_id,
+            "filename": path.name,
+            "updated_at": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        })
+    return {"reports": rows}
+
+
+@router.get("/ui/reports/{run_id}")
+def get_report_markdown(run_id: str):
+    """Read markdown file content for preview panel."""
+    path = _REPORTS_DIR / f"{run_id}.md"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Report markdown not found")
+    markdown = path.read_text(encoding="utf-8")
+    try:
+        markdown_html = _MD.render(markdown)
+    except Exception:
+        markdown_html = f"<pre>{escape(markdown)}</pre>"
+    return {"run_id": run_id, "markdown": markdown, "markdown_html": markdown_html}
 
 
 @router.get("/runs/{run_id}")

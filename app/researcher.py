@@ -28,6 +28,8 @@ from app.schemas import (
     ResearchResult,
     RetryInstruction,
     SourceRecord,
+    Claim,
+    SubquestionAnswer,
 )
 from app.llm_client import RESEARCHER_PROFILE, chat
 from app.source_normalizer import normalize
@@ -211,11 +213,21 @@ def research(
                 })
                 continue
 
+            sanitized, san_err = _sanitize_tool_arguments(tc.name, tc.arguments)
+            if san_err:
+                logger.warning(f"[researcher] Malformed tool args for {tc.name}: {san_err}")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps({"error": san_err}),
+                })
+                continue
+
             tool_calls_made += 1
-            logger.info(f"[researcher] Tool call {tool_calls_made}/{budget}: {tc.name}({tc.arguments})")
+            logger.info(f"[researcher] Tool call {tool_calls_made}/{budget}: {tc.name}({sanitized})")
 
             try:
-                raw = call_tool(tc.name, tc.arguments)
+                raw = call_tool(tc.name, sanitized)
             except ToolCallError as e:
                 logger.warning(f"[researcher] Tool call failed: {e}")
                 messages.append({
@@ -231,7 +243,7 @@ def research(
             except ToolCallError:
                 provider = "open_web_search"
 
-            record = normalize(run_id, provider, tc.name, tc.arguments, raw)
+            record = normalize(run_id, provider, tc.name, sanitized, raw)
             if record:
                 sources.append(record)
                 summary = (
@@ -283,12 +295,144 @@ def _finalize(
     sources: list[SourceRecord],
     run_id: str,
 ) -> tuple[ResearchResult, list[SourceRecord]]:
-    """Log and return the final result."""
+    """Drop claims and answers that cite fabricated or unknown source_ids; log and return."""
+    valid_ids = {s.source_id for s in sources}
+    claims_in = result.claims
+    claims_ok: list[Claim] = [
+        c for c in claims_in
+        if c.source_ids and all(sid in valid_ids for sid in c.source_ids)
+    ]
+    if len(claims_ok) < len(claims_in):
+        logger.warning(
+            f"[researcher] Dropped {len(claims_in) - len(claims_ok)} claims "
+            "with unknown or missing source_ids"
+        )
+
+    sq_ok: list[SubquestionAnswer] = []
+    for sq in result.subquestion_answers:
+        if not sq.source_ids:
+            sq_ok.append(sq)
+        elif all(sid in valid_ids for sid in sq.source_ids):
+            sq_ok.append(sq)
+        else:
+            logger.warning(
+                f"[researcher] Dropping subquestion answer with unknown source_ids: "
+                f"{sq.subquestion!r}"
+            )
+
+    gaps = list(result.gaps)
+    if len(claims_ok) < len(claims_in):
+        gaps.append(
+            "Some statements were omitted because they cited source_ids not returned by any "
+            "successful tool in this run."
+        )
+
+    result = ResearchResult(
+        subquestion_answers=sq_ok,
+        claims=claims_ok,
+        gaps=gaps,
+    )
     logger.info(
         f"[researcher] Done — claims={len(result.claims)} "
         f"gaps={len(result.gaps)} sources={len(sources)}"
     )
     return result, sources
+
+
+def _normalize_analyst_estimates_period(period: str) -> str | None:
+    """
+    Financial Datasets analyst-estimates API accepts only annual | quarterly.
+    Map common LLM outputs (q1, quarterly, etc.).
+    """
+    p = period.strip().lower()
+    if p in ("annual", "yearly", "fy", "y", "a"):
+        return "annual"
+    if p in (
+        "quarterly", "quarter", "q", "q1", "q2", "q3", "q4",
+        "1q", "2q", "3q", "4q",
+    ):
+        return "quarterly"
+    return None
+
+
+def _sanitize_tool_arguments(
+    tool: str,
+    raw: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    """
+    Strip keys small models inject into tool calls (e.g. full ResearchResult into
+    get_analyst_estimates). Returns (args_for_mcp, None) or ({}, error for the model).
+    """
+    if not isinstance(raw, dict):
+        return {}, f"Tool arguments must be a JSON object; got {type(raw).__name__}."
+
+    if tool in (
+        "get_income_statement",
+        "get_financial_metrics",
+        "get_analyst_estimates",
+    ):
+        junk_keys = ("claims", "subquestion_answers", "gaps")
+        ticker_raw = raw.get("ticker")
+        ticker = ticker_raw.strip().upper() if isinstance(ticker_raw, str) else None
+        if not ticker:
+            hint = (
+                " Do not pass claims or subquestion_answers; use only ticker, period, limit."
+                if any(k in raw for k in junk_keys)
+                else ""
+            )
+            return {}, f"{tool} requires ticker (string).{hint}"
+
+        out: dict[str, Any] = {"ticker": ticker}
+        if raw.get("period") is not None:
+            raw_p = str(raw["period"]).strip()
+            if tool == "get_analyst_estimates":
+                norm_p = _normalize_analyst_estimates_period(raw_p)
+                if norm_p:
+                    out["period"] = norm_p
+            else:
+                out["period"] = raw_p
+        if raw.get("limit") is not None:
+            try:
+                out["limit"] = int(raw["limit"])
+            except (TypeError, ValueError):
+                pass
+        return out, None
+
+    if tool == "get_ticker_info":
+        sym = raw.get("symbol") or raw.get("ticker")
+        if isinstance(sym, str) and sym.strip():
+            return {"symbol": sym.strip().upper()}, None
+        return {}, "get_ticker_info requires symbol (string)."
+
+    if tool == "get_ticker_news":
+        sym = raw.get("symbol") or raw.get("ticker")
+        if not (isinstance(sym, str) and sym.strip()):
+            return {}, "get_ticker_news requires symbol (string)."
+        out: dict[str, Any] = {"symbol": sym.strip().upper()}
+        if raw.get("count") is not None:
+            try:
+                out["count"] = int(raw["count"])
+            except (TypeError, ValueError):
+                pass
+        return out, None
+
+    if tool == "get_price_history":
+        sym = raw.get("symbol") or raw.get("ticker")
+        if not (isinstance(sym, str) and sym.strip()):
+            return {}, "get_price_history requires symbol (string)."
+        out: dict[str, Any] = {"symbol": sym.strip().upper()}
+        for key in ("period", "interval"):
+            if raw.get(key) is not None:
+                out[key] = str(raw[key]).strip()
+        return out, None
+
+    if tool == "web_search":
+        q = raw.get("query")
+        if isinstance(q, str) and q.strip():
+            return {"query": q.strip()}, None
+        return {}, "web_search requires query (string)."
+
+    return raw, None
 
 
 def _build_prompt(

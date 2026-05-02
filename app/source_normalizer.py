@@ -139,28 +139,47 @@ def _extract(
 
 # ── Yahoo Finance extractors ───────────────────────────────────────────────────
 
+def _yahoo_quote_time_utc(info: dict) -> str | None:
+    """Format yfinance ``regularMarketTime`` (unix) for grounding claims."""
+    ts = _g(info, "regularMarketTime")
+    if ts is None:
+        return None
+    try:
+        sec = float(ts)
+        return datetime.fromtimestamp(sec, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except (TypeError, ValueError, OSError):
+        return None
+
+
 def _yahoo(tool: str, args: dict, result: Any) -> dict | None:
     symbol = args.get("symbol", "").upper()
 
     if tool == "get_ticker_info":
-        name   = _g(result, "longName") or _g(result, "shortName") or symbol
-        sector = _g(result, "sector") or "N/A"
-        price  = _g(result, "currentPrice") or _g(result, "regularMarketPrice")
-        mcap   = _g(result, "marketCap")
-        pe     = _g(result, "trailingPE")
+        info = result if isinstance(result, dict) else {}
+        name   = _g(info, "longName") or _g(info, "shortName") or symbol
+        sector = _g(info, "sector") or "N/A"
+        price  = _g(info, "currentPrice") or _g(info, "regularMarketPrice")
+        mcap   = _g(info, "marketCap")
+        pe     = _g(info, "trailingPE")
+        quote_utc = _yahoo_quote_time_utc(info)
+        summary = (
+            f"{name} ({sector}). "
+            f"Price: {_fmt(price)}. "
+            f"Market cap: {_fmt_big(mcap)}. "
+            f"P/E: {_fmt(pe)}."
+        )
+        excerpt = (
+            f"currentPrice={_fmt(price)}, marketCap={_fmt_big(mcap)}, "
+            f"trailingPE={_fmt(pe)}, sector={sector}"
+        )
+        if quote_utc:
+            summary = f"{summary} Quote snapshot: {quote_utc}."
+            excerpt = f"{excerpt}, quote_snapshot_utc={quote_utc}"
         return {
             "entity":          symbol,
             "title":           f"{symbol} — Company Info",
-            "content_summary": (
-                f"{name} ({sector}). "
-                f"Price: {_fmt(price)}. "
-                f"Market cap: {_fmt_big(mcap)}. "
-                f"P/E: {_fmt(pe)}."
-            ),
-            "raw_excerpt": (
-                f"currentPrice={_fmt(price)}, marketCap={_fmt_big(mcap)}, "
-                f"trailingPE={_fmt(pe)}, sector={sector}"
-            ),
+            "content_summary": summary,
+            "raw_excerpt":     excerpt,
         }
 
     if tool == "get_ticker_news":

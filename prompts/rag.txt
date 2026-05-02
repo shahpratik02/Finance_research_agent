@@ -15,9 +15,10 @@ Retrieved passages (file path, offsets, and optional page count help provenance)
 {passages_block}
 
 Critical rules:
+- **Entity match:** The company or ticker named in the user query (e.g. Google/Alphabet/GOOGL) must match the legal entity in the passages and file metadata (e.g. NVIDIA/NVDA filings are NOT evidence for a Google question). If the documents are clearly about a different issuer, set adequacy **none**, output **zero** claims about the queried company, and state in gaps that the corpus does not cover that entity. You may still describe what the passages are about in gaps without treating them as answering the query.
 - If the passages clearly refer to the same company or ticker as the user query (or a subsidiary named in the query), you MUST output at least one Claim with concrete facts from the excerpts (e.g. revenue, net income, EPS, cash flow, period labels). Use adequacy **partial** when the user asked for live price, trading outlook, or news not present in the PDF but fundamentals ARE present.
 - Never set adequacy to **complete** for questions about live share price, current trading state, quotes, or other real-time market data unless those exact figures and timestamps appear verbatim in the excerpts. In those cases use **partial** so external tools can supplement.
-- Use adequacy **none** only when passages are unrelated to the query topic/entity OR contain no extractable facts (e.g. blank or garbled only).
+- Use adequacy **none** when passages are unrelated to the query topic/entity OR contain no extractable facts (e.g. blank or garbled only).
 - Each claim MUST include one or more source_id from the allowed list above.
 - support_type: "direct" when the passage states the fact; "indirect" when clearly implied; "circumstantial" only when weak.
 

@@ -8,7 +8,7 @@ if __name__ == "__main__":
     # Folder is resolved relative to the project root (parent of app/), e.g. ./documents
     result = run_pipeline(
         QueryInput(
-            query="What is the current state of NVIDIA stock?",
+            query="What is the current state of GOOGLE stock and expected future growth?",
             output_style="memo",
             documents_folder="documents",
         )
